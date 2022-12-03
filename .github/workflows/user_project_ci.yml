@@ -17,12 +17,66 @@ env:
   OPENLANE_ROOT: '/home/runner/work/openlane'
   PDK: 'gf180mcuC'
   PDK_TECH: 'gf180mcu'
-  SETUP_CACHE_KEY: 'gfmpw-0b'
+  CACHE_KEY: 'gfmpw-0b'
 
 concurrency: ${{ github.workflow }}-${{ github.ref_name }}
 
 jobs:
+  xls:
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout repo
+      uses: actions/checkout@v3
+    - name: cache conda
+      uses: actions/cache@v3
+      with:
+        path: ~/conda_pkgs_dir
+        key:
+          ${{ runner.os }}-${{ env.CACHE_KEY }}-conda-${{ hashFiles('environment.yml') }}
+    - name: setup miniconda
+      uses: conda-incubator/setup-miniconda@v2.2.0
+      with:
+        activate-environment: tinytapeout
+        channel-priority: strict
+        environment-file: environment.yml
+        use-only-tar-bz2: true
+    - name: update path
+      shell: bash -l {0}
+      run: |
+        echo $CONDA/envs/tinytapeout/bin >> $GITHUB_PATH
+    - name: run dslx test
+      run: |
+        cat << EOF >> $GITHUB_STEP_SUMMARY
+        # test
+        \`\`\`
+        `interpreter_main verilog/rtl/user_module.x 2>&1`
+        \`\`\`
+        EOF
+    - name: generate rtl
+      run: |
+        ir_converter_main --top=user_module verilog/rtl/user_module.x > verilog/rtl/user_module.ir
+        opt_main verilog/rtl/user_module.ir > verilog/rtl/user_module_opt.ir
+        codegen_main --module_name user_module --use_system_verilog=false --generator=combinational verilog/rtl/user_module_opt.ir > verilog/rtl/user_module.v
+    - name: add verilog to summary
+      run: |
+        cat << EOF >> $GITHUB_STEP_SUMMARY
+        # codegen
+        \`\`\`
+        `cat verilog/rtl/user_module.v`
+        \`\`\`
+        EOF
+    - name: populate rtl cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          verilog/rtl/user_module.x
+          verilog/rtl/user_module.ir
+          verilog/rtl/user_module_opt.ir
+          verilog/rtl/user_module.v
+        key: ${{ runner.os }}-${{ env.CACHE_KEY }}-rtl-${{ github.run_id }}
   gds:
+    needs:
+    - xls
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
@@ -37,7 +91,7 @@ jobs:
           caravel/
           mgmt_core_wrapper/
           openlane.tar
-        key: ${{ runner.os }}-setup-${{ env.SETUP_CACHE_KEY }}
+        key: ${{ runner.os }}-setup-${{ env.CACHE_KEY }}
 
     - if: steps.cache-setup.outputs.cache-hit != 'true'
       name: setup
@@ -59,6 +113,17 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+
+    # restore generated rtl
+    - name: restore rtl cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          verilog/rtl/user_module.x
+          verilog/rtl/user_module.ir
+          verilog/rtl/user_module_opt.ir
+          verilog/rtl/user_module.v
+        key: ${{ runner.os }}-${{ env.CACHE_KEY }}-rtl-${{ github.run_id }}
 
     - name: fetch verilog and build config
       run: |
