@@ -17,7 +17,7 @@ env:
   OPENLANE_ROOT: '/home/runner/work/openlane'
   PDK: 'gf180mcuC'
   PDK_TECH: 'gf180mcu'
-  CACHE_KEY: 'gfmpw-0b'
+  CACHE_KEY: 'gfmpw-0d'
 
 concurrency: ${{ github.workflow }}-${{ github.ref_name }}
 
